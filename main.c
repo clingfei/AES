@@ -1,7 +1,5 @@
 #include <stdio.h>
 
-typedef unsigned char word8;
-typedef unsigned int word32;
 typedef __int8_t uint8_t;
 
 #define Nb 4
@@ -108,6 +106,50 @@ void InvShiftRows(uint8_t *state) {
         offset++;
     }
 }
+
+void mul(const uint8_t *a, uint8_t *b, uint8_t * res) {
+    int i, j;
+    uint8_t sum = 0;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < Nb; ++j) {
+            sum = 0x00;
+            for (int k = 0; k < 4; k++) {
+                sum += a[i * Nb + k] * b[k * Nb + j];
+            }
+            res[i * Nb + j] = sum;
+        }
+    }
+}
+
+void MixColumns(uint8_t *state) {
+    const uint8_t c[16] = {
+            0x02, 0x03, 0x01, 0x01,
+            0x01, 0x02, 0x03, 0x01,
+            0x01, 0x01, 0x02, 0x03,
+            0x03, 0x01, 0x01, 0x02
+    };
+    uint8_t b[4 * Nb];
+    mul(c, state, b);
+    int i = 0;
+    for (i = 0; i < 4 * Nb; ++i)
+        state[i] = b[i];
+}
+
+void InvMixColumns(uint8_t *state) {
+    const uint8_t d[16] = {
+        0x0E, 0x0B, 0x0D, 0x09,
+        0x09, 0x0E, 0x0B, 0x0D,
+        0x0D, 0x09, 0x0E, 0x0B,
+        0x0B, 0x0D, 0x09, 0x0E
+    };
+    uint8_t b[4 * Nb];
+    mul(d, state, b);
+    int i;
+    for (i = 0; i < 4 * Nb; ++i)
+        state[i] = b[i];
+}
+
+
 
 void AddRoundKey() {                        //轮密钥加
 
