@@ -1,14 +1,20 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef __int8_t uint8_t;
 
 #define Nb 4
+
+
+int Nr = 0, Nk = 0;
 
 /*
  * Nb是state的列数，Nb = 块长 / 32， 明文应该被划分成4*Nb的矩阵
  * Nk是加密密钥的列数，Nk = 密钥长 / 32
  * Nr是轮数， Nr =
  */
+
 const uint8_t SBox[256] = {
     /*  0     1     2     3     4     5     6     7     8     9     a     b     c     d     e      f  */
     0x63, 0x7C, 0x5D, 0x42, 0x1F, 0x00, 0x21, 0x3E, 0x9B, 0x84, 0xA5, 0xBA, 0xE7, 0xF8, 0xD9, 0xC6,
@@ -47,6 +53,14 @@ const uint8_t invSBox[256] = {
     0x16, 0x5C, 0x82, 0xC8, 0x3F, 0x75, 0xAB, 0xE1, 0x44, 0x0E, 0xD0, 0x9A, 0x6D, 0x27, 0xF9, 0xB3,
     0xFB, 0xB1, 0x6F, 0x25, 0xD2, 0x98, 0x46, 0x0C, 0xA9, 0xE3, 0x3D, 0x77, 0x80, 0xCA, 0x14, 0x5E,
     0x5F, 0x15, 0xCB, 0x81, 0x76, 0x3C, 0xE2, 0xA8, 0x0D, 0x47, 0x99, 0xD3, 0x24, 0x6E, 0xB0, 0xFA
+};
+
+const int Nr_table[25] = {
+        10, 11, 12, 13, 14,
+        11, 11, 12, 13, 14,
+        12, 12, 12, 13, 14,
+        13, 13, 13, 13, 14,
+        14, 14, 14, 14, 14
 };
 
 /*
@@ -149,43 +163,111 @@ void InvMixColumns(uint8_t *state) {
         state[i] = b[i];
 }
 
-
-
-void AddRoundKey() {                        //轮密钥加
-
-}
-
-void Round(State, ExpandedKey[i]) {         //轮函数
-    SubBytes(State);
-    ShiftRows(State);
-    MixColumns(State);
-    AddRoundKey(State, ExpandedKey[i]);
-}
-
-void FinalRound() {                         //最后一轮
-    SubBytes(State);
-    ShiftRows(State);
-    AddRoundKey(State, ExpandedKey[Nr]);
-}
-
-void KeyExpansion() {                       //密钥扩展
-
+/*
+ * AddRoundKey is its own inverse
+ * round key is denoed by ExpandedKey
+ */
+void AddRoundKey(uint8_t *state, const uint8_t *cipherkey) {                        //轮密钥加
+    int i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < Nb; ++j) {
+            state[i * Nb +j] = state[i * Nb + j] ^ cipherkey[i * Nb + j];
+        }
+    }
 }
 
 
+void getExpandedKey(int round, const uint8_t *W, uint8_t *ExpandedKey) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = round * Nb; j < (round + 1) * Nb; ++j) {
+            ExpandedKey[i * Nb + j] = W[i * Nb * (Nr + 1) + j];
+        }
+    }
+}
 
-int Encrypt(word a[4][]) {
+/*
+ * the number of rounds was raised by one for every additional 32 bits  int the cipher key.
+ * Numberof rounds Nr as a function of Nb and Nk
+ */
+void Round(int round, uint8_t *state, uint8_t *W) {         //轮函数
+    SubBytes(state);
+    ShiftRows(state);
+    MixColumns(state);
+    uint8_t *ExpandedKey = (uint8_t *) malloc(4 * Nb);
+    memset(ExpandedKey, 0, 4 * Nb);
+    getExpandedKey(round, W, ExpandedKey);
+    AddRoundKey(state, ExpandedKey);
+}
+
+void FinalRound(uint8_t *state, uint8_t *W) {                         //最后一轮
+    SubBytes(state);
+    ShiftRows(state);
+    uint8_t *ExpandedKey = (uint8_t *) malloc(4 * Nb);
+    memset(ExpandedKey, 0, 4 * Nb);
+    getExpandedKey(Nr, W, ExpandedKey);
+    AddRoundKey(state, ExpandedKey);
+}
+
+void KeyExpansion(uint8_t *W, const int *cipherkey) {                       //密钥扩展
+    int i, j;
+    /* the first Nk columns of W are filled with the cipher key */
+
+    /* W是由密钥扩展成的4行Nb(Nr+1)列的矩阵 */
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < Nk; j++) {
+            W[4 * Nb * (Nr + 1) + j] = cipherkey[4 * i + j];
+        }
+    }
+
+    while (j < Nb * (Nr + 1)) {
+        if (j % Nk == 0) {
+            for (i = 0; i < 4; ++i) {
+                W[i * (Nb * (Nr + 1)) + j] = W[i * (Nb * (Nr + 1)) + j - 1] ^ W[i * (Nb * (Nr + 1)) + j - Nk];
+            }
+        }
+        else if (Nk > 6 && j % Nk == 4){
+            for (i = 0; i < 4; ++i) {
+                W[i * (Nb * (Nr + 1)) + j] = W[i * (Nb * (Nr + 1)) + j - Nk] ^ SBox[W[i * (Nb * (Nr + 1)) + j - 1]];
+            }
+        }
+        else {
+            for (i = 0; i < 4; ++i) {
+                W[i * (Nb * (Nr + 1)) + j] = W[i * (Nb * (Nr + 1)) + j - Nk] ^ SBox[W[i * (Nb * (Nr + 1)) + j - 1]];
+            }
+        }
+        ++j;
+    }
+
+
+}
+
+
+
+int Encrypt(uint8_t *plaintext, int len, const uint8_t *cipherkey, int keylen) {
     uint8_t state[4 * Nb];                      //4行 Nb列
 
-    KeyExpansion(State, CipherKey);
-    AddRoundKey(CipherKey, ExpandedKey);
-    for (int i = 1, i < Nr; i++) Round(state, ExpandedKey[i]);
-    FinalRound(State, ExpandedKey[Nr]);
+    Nk = keylen / 32;
+    Nr = Nr_table[(Nk - 4) * 5 + (Nb - 4) ];
+
+    uint8_t *W = (uint8_t *)malloc(4 * Nb * (Nr + 1));
+    memset(W, 0, 4 * Nb * (Nr + 1));
+
+    int i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < Nk; ++j) {
+            state[i * Nb + j] = plaintext[i * Nb + j];
+        }
+    }
+    /* state是初始的明文， W是扩展后的密钥 */
+    KeyExpansion(W, (const int *) cipherkey);
+    for (i = 0  ; i < Nr; i++) Round(i, state, W);
+    FinalRound(state, W);
+
+    for (i = 0; i < 4 * Nb; ++i)
+        printf("%u", state[i]);
 }
 
 int main() {
-    int keylen = 0;
 
-    uint8_t state[]
     return 0;
 }
