@@ -185,6 +185,13 @@ void getExpandedKey(int round, const uint8_t *W, uint8_t *ExpandedKey) {
     }
 }
 
+void subExpandedKey(int round, uint8_t *W, const uint8_t *ExpandedKey) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = round * Nb; j < (round + 1) * Nb; ++j) {
+            W[i * Nb * (Nr + 1) + j] = ExpandedKey[i * Nb + j];
+        }
+    }
+}
 /*
  * the number of rounds was raised by one for every additional 32 bits  int the cipher key.
  * Numberof rounds Nr as a function of Nb and Nk
@@ -199,6 +206,16 @@ void Round(int round, uint8_t *state, uint8_t *W) {         //轮函数
     AddRoundKey(state, ExpandedKey);
 }
 
+void InvRound(int round, uint8_t *state, uint8_t *W) {
+    uint8_t *ExpandedKey = (uint8_t *) malloc(4 * Nb);
+    memset(ExpandedKey, 0, 4 * Nb);
+    getExpandedKey(round, W, ExpandedKey);
+    AddRoundKey(state, ExpandedKey);
+    InvMixColumns(state);
+    InvShiftRows(state);
+    InvSubBytes(state);
+}
+
 void FinalRound(uint8_t *state, uint8_t *W) {                         //最后一轮
     SubBytes(state);
     ShiftRows(state);
@@ -208,7 +225,15 @@ void FinalRound(uint8_t *state, uint8_t *W) {                         //最后�
     AddRoundKey(state, ExpandedKey);
 }
 
-void KeyExpansion(uint8_t *W, const int *cipherkey) {                       //密钥扩展
+void InvFinalRound(uint8_t *state, uint8_t *W) {
+    uint8_t *ExpandedKey = (uint8_t *) malloc(4 * Nb);
+    memset(ExpandedKey, 0, 4 * Nb);
+    getExpandedKey(Nr, W, ExpandedKey);
+    InvShiftRows(state);
+    InvSubBytes(state);
+}
+
+void KeyExpansion(uint8_t *W, const uint8_t *cipherkey) {                       //密钥扩展
     int i, j;
     /* the first Nk columns of W are filled with the cipher key */
 
@@ -264,9 +289,86 @@ int Encrypt(uint8_t *plaintext, int len, const uint8_t *cipherkey, int keylen) {
     FinalRound(state, W);
 
     for (i = 0; i < 4 * Nb; ++i)
-        printf("%u", state[i]);
+        printf("%u ", state[i]);
+    return 0;
 }
 
+int Decrypt(const uint8_t *ciphertext, int len, const uint8_t *cipherkey, int keylen) {
+    uint8_t  state[4 * Nb];
+
+    Nk = keylen / 32;
+    Nr = Nr_table[(Nk - 4) * 5 + (Nb - 4)];
+
+    uint8_t *W = (uint8_t *)malloc(4 * Nb * (Nr + 1));
+    memset(W, 0, 4 * Nb * (Nr + 1));
+
+    int i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < Nk; ++j) {
+            state[i * Nb + j] = ciphertext[i * Nb + j];
+        }
+    }
+    KeyExpansion(W, (const int *) cipherkey);
+    for (i = 0; i < Nr; i++) InvRound(i, state, W);
+    InvFinalRound(state, W);
+
+    for (i = 0; i < 4 * Nb; ++i)
+        printf("%u ", state[i]);
+    return 0;
+}
+
+void EqKeyExpansion(uint8_t *EqExpandedKey, const uint8_t *cipherKey) {
+    KeyExpansion(EqExpandedKey, cipherKey);
+    for (int i = 1; i < Nr; i++) {
+        uint8_t *ExpandedKey = (uint8_t *) malloc(4 * Nb);
+        memset(ExpandedKey, 0, 4 * Nb);
+        getExpandedKey(i, EqExpandedKey, ExpandedKey);
+        InvMixColumns(ExpandedKey);
+        subExpandedKey(i, EqExpandedKey, ExpandedKey);
+    }
+}
+
+void EqRound(uint8_t *state, uint8_t *ExpandedKey) {
+    InvSubBytes(state);
+    InvShiftRows(state);
+    InvMixColumns(state);
+    AddRoundKey(state, ExpandedKey);
+}
+
+void EqFinalRound(uint8_t *state, uint8_t *ExpandedKey) {
+    InvSubBytes(state);
+    InvShiftRows(state);
+    AddRoundKey(state, ExpandedKey);
+}
+
+int EqDecrypt(const uint8_t *ciphertext, int len, const uint8_t *cipherkey, int keylen) {
+    uint8_t state[4 * Nb];
+
+    Nk = keylen / 32;
+    Nr = Nr_table[(Nk - 4) * 5 + (Nb - 4)];
+
+    uint8_t *EqExpandedKey = (uint8_t *)malloc(4 * Nb * (Nr + 1));
+    memset(EqExpandedKey, 0, 4 * Nb * (Nr + 1));
+
+    int i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < Nk; ++j) {
+            state[i * Nb + j] = ciphertext[i * Nb + j];
+        }
+    }
+
+    EqKeyExpansion(EqExpandedKey, cipherkey);
+    uint8_t *ExpandedKey = (uint8_t *) malloc(4 * Nb);
+    memset(ExpandedKey, 0, 4 * Nb);
+    getExpandedKey(Nr, EqExpandedKey, ExpandedKey);
+    AddRoundKey(state, ExpandedKey);
+    for (i = Nr - 1; i > 0; i--) {
+        getExpandedKey(i, EqExpandedKey, ExpandedKey);
+        EqRound(state, ExpandedKey);
+    }
+    getExpandedKey(0, EqExpandedKey, ExpandedKey);
+    EqFinalRound(state, EqExpandedKey);
+}
 int main() {
 
     return 0;
