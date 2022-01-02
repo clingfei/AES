@@ -1,6 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "AES.h"
 
 typedef unsigned char word8;
 typedef unsigned int word32;
@@ -8,7 +6,7 @@ typedef unsigned int word32;
 /*
  * Logtable are used to perform multiplications in GF(256)
  */
-word8 Logtable[256] = {
+const word8 Logtable[256] = {
         0, 0 , 25, 1 , 50 , 2, 26 ,198 , 75,199 , 27 ,104, 51 ,238 ,223, 3,
         100, 4 ,224 , 14, 52 ,141,129,239, 76,113, 8 ,200 ,248,105 , 28,193 ,
         125,194, 29,181,249, 185, 39,106, 77,228,166,114,154,201, 9,120,
@@ -27,7 +25,7 @@ word8 Logtable[256] = {
         103 , 74 ,237,222 ,197, 49,254, 24, 13 , 99, 140,128 ,192 ,247 ,112, 7
 };
 
-word8 Alogtable[256] = {
+const word8 Alogtable[256] = {
         1, 3, 5, 15, 17, 51, 85,255, 26, 46,114 ,150,161 ,248 , 19, 53,
         95,225, 56, 72,216,115,149,164,247, 2, 6, 10, 30, 34 ,102,170,
         229 , 52, 92,228, 55, 89,235, 38 ,106,190,217,112,144,171,230, 49,
@@ -46,7 +44,7 @@ word8 Alogtable[256] = {
         57, 75,221,124,132,151,162,253, 28, 36,108,180,199, 82,246, 1
 };
 
-word8 S[256] = {
+const word8 S[256] = {
         99,124,119 ,123,242,107 ,111 ,197 , 48 , 1,103, 43,254,215,171,118,
         202 ,130,201,125,250, 89, 71,240,173,212,162,175,156,164 ,114,192,
         183,253,147, 38, 54, 63,247,204, 52,165,229,241,113 ,216 , 49, 21,
@@ -65,7 +63,7 @@ word8 S[256] = {
         140,161,137 , 13,191,230, 66,104, 65,153, 45, 15,176, 84,187, 22
 };
 
-word8 Si[256] = {
+const word8 Si[256] = {
         82, 9,106,213, 48 , 54,165, 56,191, 64,163,158,129,243,215,251 ,
         124,227, 57,130,155, 47,255,135, 52,142, 67, 68,196,222,233,203 ,
         84,123,148, 50,166,194, 35, 61,238, 76,149, 11, 66 ,250,195 , 78,
@@ -84,16 +82,12 @@ word8 Si[256] = {
         23 , 43, 4,126,186,119,214, 38,225,105, 20, 99, 85, 33 , 12,125
 };
 
-word32 RC[30] = {
+const word32 RC[30] = {
         0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80,
         0x1B, 0x36, 0x6C, 0xD8, 0xAB, 0x4D, 0x9A, 0x2F, 0x5E ,
         0xBC, 0x63, 0xC6, 0x97, 0x35, 0x6A, 0xD4, 0xB3, 0x7D,
         0xFA, 0xEF, 0xC5
 };
-
-#define MAXBC 8
-#define MAXKC 8
-#define MAXROUNDS 14
 
 static word8 shifts[5][4] = {
         0, 1, 2, 3,
@@ -112,127 +106,107 @@ static int numrounds[5][5] = {
 };
 
 /*
- * BC是Nb， 即state矩阵的列数
- * KC是Nk = 密钥长度/32
+ * Nb， 即state矩阵的列数
+ * Nk = 密钥长度/32
  */
-int BC, KC, ROUNDS;
+int Nb, Nk, ROUNDS;
 
-/*
- * 输入两个word8，返回在GF (256)中的乘积
- * 用于 MixColumns和InvMixColumns的矩阵乘法
- */
 word8 mul (word8 a, word8 b) {
     if (a && b) return Alogtable[(Logtable[a] + Logtable[b]) % 255];
     else return 0;
 }
 
-/*
- * a[4][MAXBC]是state矩阵，rk[4][MAXBC]是轮密钥
- * MAXBC是NK，即每次轮密钥加都只针对矩阵的MAXBC列
- */
-void AddRoundKey(word8 a[4][MAXBC], word8 rk[4][MAXBC]) {
+void AddRoundKey(word8 state[4][MAXBC], word8 rk[4][MAXBC]) {
     int i, j;
     for (i = 0; i < 4; ++i)
-        for (j = 0; j < BC; j++)
-            a[i][j] ^= rk[i][j];
+        for (j = 0; j < Nb; j++)
+            state[i][j] ^= rk[i][j];
 }
 
-/*
- * Replace every byte of the input by the byte at that place in the non-linear S-box
- * 输入a[4][MAXBC]为状态矩阵， 使用box对state进行非线性替换
- */
-void SubBytes(word8 a[4][MAXBC], word8 box[256]) {
+void SubBytes(word8 state[4][MAXBC], word8 box[256]) {
     int i, j;
     for (i = 0; i < 4; i++)
-        for (j = 0; j < BC; j++)
-            a[i][j] = box[a[i][j]];
+        for (j = 0; j < Nb; j++)
+            state[i][j] = box[state[i][j]];
 }
 
-/*
- * d 是什么
- * ShiftRows负责对状态矩阵进行行移位， 移位的长度由行数和Nb决定
- */
-void ShiftRows(word8 a[4][MAXBC], word8 d) {
+void ShiftRows(word8 state[4][MAXBC], word8 d) {
     word8 tmp[MAXBC];
     int i, j;
     if (d == 0) {
-        for (i = 0; i < BC; ++i) {
-            for (j = 0; j < BC; j++)
-                tmp[j] = a[i][(j + shifts[BC - 4][i]) % BC];
-            for (j = 0; j < BC; j++)
-                a[i][j] = tmp[j];
+        for (i = 0; i < Nb; ++i) {
+            for (j = 0; j < Nb; j++)
+                tmp[j] = state[i][(j + shifts[Nb - 4][i]) % Nb];
+            for (j = 0; j < Nb; j++)
+                state[i][j] = tmp[j];
         }
     }
     else {
         for (i = 1; i < 4; ++i) {
-            for (j = 0; j < BC; j++)
-                tmp[j] = a[i][(BC + j - shifts[BC - 4][i]) % BC];
-            for (j = 0; j < BC; j++) a[i][j] = tmp[j];
+            for (j = 0; j < Nb; j++)
+                tmp[j] = state[i][(Nb + j - shifts[Nb - 4][i]) % Nb];
+            for (j = 0; j < Nb; j++) state[i][j] = tmp[j];
         }
     }
 }
 
-/*
- * Mix the four bytes of every column in a linear way
- */
-void MixColumns(word8 a[4][MAXBC]) {
-    word8 b[4][MAXBC];
+void MixColumns(word8 state[4][MAXBC]) {
+    word8 tmp[4][MAXBC];
     int i, j;
-    for (j = 0; j < BC; ++j)
+    for (j = 0; j < Nb; ++j)
         for (i = 0; i < 4; i++)
-            b[i][j] = mul(2, a[i][j]) ^ mul(3, a[(i + 1) % 4][j]) ^ a[(i + 2) % 4][j] ^ a[(i + 3) % 4][j];
+            tmp[i][j] = mul(2, state[i][j])
+                    ^ mul(3, state[(i + 1) % 4][j])
+                    ^ state[(i + 2) % 4][j]
+                    ^ state[(i + 3) % 4][j];
     for (i = 0; i < 4; i++)
-        for (j = 0; j < BC; j++)
-            a[i][j] = b[i][j];
+        for (j = 0; j < Nb; j++)
+            state[i][j] = tmp[i][j];
 }
 
-/*
- * opposite operation of MixColumns
- */
-void InvMixColumns(word8 a[4][MAXBC]) {
+void InvMixColumns(word8 state[4][MAXBC]) {
     int i, j;
-    word8 b[4][MAXBC];
+    word8 tmp[4][MAXBC];
 
-    for (j = 0; j < BC; j++)
+    for (j = 0; j < Nb; j++)
         for (i = 0; i < 4; i++)
-            b[i][j] = mul(0xe, a[i][j]) ^ mul(0xb, a[(i + 1) % 4][j]) ^ mul(0xd, a[(i + 2) % 4][j]) ^ mul(0x9, a[(i + 3) % 4][j]);
+            tmp[i][j] = mul(0xe, state[i][j])
+                    ^ mul(0xb, state[(i + 1) % 4][j])
+                    ^ mul(0xd, state[(i + 2) % 4][j])
+                    ^ mul(0x9, state[(i + 3) % 4][j]);
     for (i = 0; i < 4; i++)
-        for (j = 0; j < BC; j++)
-            a[i][j] = b[i][j];
+        for (j = 0; j < Nb; j++)
+            state[i][j] = tmp[i][j];
 }
 
-/*
- * W为扩展密钥，MAXROUNDS + 1  * 4 * MAXBC的矩阵
- * Expanded[i]则为W[i]
- */
-int KeyExpansion(word8 k[4][MAXKC], word8 W[MAXROUNDS + 1][4][MAXBC]) {
+int KeyExpansion(word8 key[4][MAXKC], word8 ExpandedKey[MAXROUNDS + 1][4][MAXBC]) {
     int i, j, t, RCpointer = 1;
     word8 tk[4][MAXKC];
 
     /*
      * the first Nk columns are filled with the cipher key.
      */
-    for (j = 0; j < KC; j++)
+    for (j = 0; j < Nk; j++)
         for (i = 0; i < 4; i++)
-            tk[i][j] = k[i][j];
+            tk[i][j] = key[i][j];
 
     t = 0;
     /* copy values into round key array*/
-    for (j = 0; (j < KC) && (t < (ROUNDS + 1) * BC); j++, t++)
+    for (j = 0; (j < Nk) && (t < (ROUNDS + 1) * Nb); j++, t++)
         for (i = 0; i < 4; i++)
-            W[t / BC][i][t % BC] = tk[i][j];
+            ExpandedKey[t / Nb][i][t % Nb] = tk[i][j];
 
     /*
      * tk中存放的是column i - 1的密钥
      * 如果i不是Nk的倍数，那么第i列是第i - Nk列和第 i - 1列的按位异或， 否则第i列是第i - Nk和第 i - 1列的非线性函数的按列异或
      */
-    while (t < (ROUNDS + 1) * BC) {
+    while (t < (ROUNDS + 1) * Nb) {
         // tk 4 * Nk的矩阵  每一列与他的后一列异或，
         /*
          * 第 0 列 与 i - 1列的S盒置换异或
          */
         for (i = 0; i < 4; i++)
-            tk[i][0] ^= S[tk[(i + 1) % 4][KC - 1]];
+            tk[i][0] ^= S[tk[(i + 1) % 4][Nk - 1]];
         tk[0][0] ^=RC[RCpointer++];
 
         /*
@@ -241,8 +215,8 @@ int KeyExpansion(word8 k[4][MAXKC], word8 W[MAXROUNDS + 1][4][MAXBC]) {
          * Nk = keylength / 32, Nb = blocklength/32
          * 计算轮密钥时，按照Nk * 4来计算，划分时按照每组4 * Nb依次存放
          */
-        if (KC <= 6)
-            for (j = 1; j < KC; j++)
+        if (Nk <= 6)
+            for (j = 1; j < Nk; j++)
                 for (i = 0; i < 4; i++)
                     tk[i][j] ^= tk[i][j - 1];
         else {
@@ -251,62 +225,59 @@ int KeyExpansion(word8 k[4][MAXKC], word8 W[MAXROUNDS + 1][4][MAXBC]) {
                     tk[i][j] ^= tk[i][j - 1];
             for(i = 0; i < 4; i++)
                 tk[i][4] ^= S[tk[i][3]];
-            for(j = 5; j < KC; j++)
+            for(j = 5; j < Nk; j++)
                 for(i = 0; i < 4; i++)
                     tk[i][j] ^= tk[i][j - 1];
         }
 
         /* copy values into round key array */
-        for (j = 0; (j < KC) && (t < (ROUNDS + 1) * BC); j++, t++)
+        for (j = 0; (j < Nk) && (t < (ROUNDS + 1) * Nb); j++, t++)
             for (i = 0; i < 4; i++)
-                W[t / BC][i][t % BC] = tk[i][j];
+                ExpandedKey[t / Nb][i][t % Nb] = tk[i][j];
     }
 
     return 0;
 }
 
-/*
- * 矩阵a是待加密的明文块， rk是扩展后的密钥
- */
-int Encrypt(word8 a[4][MAXBC], word8 rk[MAXROUNDS + 1][4][MAXBC]) {
+int Encrypt(word8 state[4][MAXBC], word8 rk[MAXROUNDS + 1][4][MAXBC]) {
     /*
      * Encryption of one block
      */
     int r;
 
     /* key addition */
-    AddRoundKey(a, rk[0]);
+    AddRoundKey(state, rk[0]);
 
     for (r = 1; r < ROUNDS; r++) {
-        SubBytes(a, S);
-        ShiftRows(a, 0);
-        MixColumns(a);
-        AddRoundKey(a, rk[r]);
+        SubBytes(state, S);
+        ShiftRows(state, 0);
+        MixColumns(state);
+        AddRoundKey(state, rk[r]);
     }
 
     /*
      * final round don't have MixColumns
      */
-    SubBytes(a, S);
-    ShiftRows(a, 0);
-    AddRoundKey(a, rk[ROUNDS]);
+    SubBytes(state, S);
+    ShiftRows(state, 0);
+    AddRoundKey(state, rk[ROUNDS]);
 
     return 0;
 }
 
-int Decrypt(word8 a[4][MAXBC], word8 rk[MAXROUNDS + 1][4][MAXBC]) {
+int Decrypt(word8 state[4][MAXBC], word8 rk[MAXROUNDS + 1][4][MAXBC]) {
     int r;
-    AddRoundKey(a, rk[ROUNDS]);
-    SubBytes(a, Si);
-    ShiftRows(a, 1);
+    AddRoundKey(state, rk[ROUNDS]);
+    SubBytes(state, Si);
+    ShiftRows(state, 1);
 
     for (r = ROUNDS-1; r > 0; r--) {
-        AddRoundKey(a, rk[r]);
-        InvMixColumns(a);
-        SubBytes(a, Si);
-        ShiftRows(a, 1);
+        AddRoundKey(state, rk[r]);
+        InvMixColumns(state);
+        SubBytes(state, Si);
+        ShiftRows(state, 1);
     }
-    AddRoundKey(a, rk[0]);
+    AddRoundKey(state, rk[0]);
 
     return 0;
 }
@@ -315,20 +286,20 @@ int main() {
     int i, j;
     word8 a[4][MAXBC], rk[MAXROUNDS + 1][4][MAXBC], sk[4][MAXBC];
 
-    for (KC = 4; KC <= 8; KC++)
-        for (BC = 4; BC <= 8; BC++){
-            ROUNDS = numrounds[KC-4][BC-4];
-            for(j = 0; j < BC; j++)
+    for (Nk = 4; Nk <= 8; Nk++)
+        for (Nb = 4; Nb <= 8; Nb++){
+            ROUNDS = numrounds[Nk - 4][Nb - 4];
+            for(j = 0; j < Nb; j++)
                 for (i = 0; i < 4; i++)
                     a[i][j] = 0;
-            for (j = 0; j < KC; j++)
-                for (i = 0; i < KC; i++)
+            for (j = 0; j < Nk; j++)
+                for (i = 0; i < Nk; i++)
                     sk[i][j] = 0;
             KeyExpansion(sk, rk);
             Encrypt(a, rk);
 
-            printf("block length %d key length %d\n", 32 * BC,32 * KC) ;
-            for(j = 0 ; j < BC ; j++)
+            printf("block length %d key length %d\n", 32 * Nb, 32 * Nk) ;
+            for(j = 0 ; j < Nb ; j++)
                 for(i = 0 ; i < 4 ; i ++)
                     printf("%02X" , a[i][j]);
             printf("\n") ;
