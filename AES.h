@@ -25,7 +25,7 @@ void AddRoundKey(word8 state[4][MAXBC], word8 rk[4][MAXBC]);
  * Replace every byte of the input by the byte at that place in the non-linear S-box
  * 输入state[4][MAXBC]为状态矩阵， 使用box对state进行非线性替换
  */
-void SubBytes(word8 state[4][MAXBC], word8 box[256]);
+void SubBytes(word8 state[4][MAXBC], const word8 box[256]);
 
 /*
  * d 是什么

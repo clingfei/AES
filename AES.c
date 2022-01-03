@@ -123,7 +123,7 @@ void AddRoundKey(word8 state[4][MAXBC], word8 rk[4][MAXBC]) {
             state[i][j] ^= rk[i][j];
 }
 
-void SubBytes(word8 state[4][MAXBC], word8 box[256]) {
+void SubBytes(word8 state[4][MAXBC], const word8 box[256]) {
     int i, j;
     for (i = 0; i < 4; i++)
         for (j = 0; j < Nb; j++)
